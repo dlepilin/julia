@@ -163,6 +163,21 @@ DEP_LIBS_STAGED := $(filter-out suitesparse suitesparse-wrapper osxunwind,$(DEP_
 ## Common build target prefixes
 
 default: | $(build_prefix)
+
+# Part of the FreeBSD libgcc_s kludge
+ifeq ($(OS),FreeBSD)
+ifneq ($(BUILD_CUSTOM_LIBCXX),1)
+default: $(build_libdir)/libc++.so.1
+ifeq ($(USE_SYSTEM_PATCHELF),1)
+$(build_libdir)/libc++.so.1:
+	-$(JULIAHOME)/contrib/fixup-freebsd-libs.sh $(PATCHELF) $(build_libdir) $(GCCPATH)
+else
+$(build_libdir)/libc++.so.1: $(build_prefix)/manifest/patchelf
+	-$(JULIAHOME)/contrib/fixup-freebsd-libs.sh $(PATCHELF_BIN) $(build_libdir) $(GCCPATH)
+endif
+endif
+endif
+
 get: $(addprefix get-, $(DEP_LIBS))
 extract: $(addprefix extract-, $(DEP_LIBS))
 configure: $(addprefix configure-, $(DEP_LIBS))

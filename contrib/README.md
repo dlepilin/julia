@@ -8,6 +8,7 @@ Installation
 |[ check-whitespace.sh ](https://github.com/JuliaLang/julia/blob/master/contrib/check-whitespace.sh) | Check for trailing white space |
 |[ commit-name.sh ](https://github.com/JuliaLang/julia/blob/master/contrib/commit-name.sh) | Computes a version name for a commit |
 |[ filterArgs.sh ](https://github.com/JuliaLang/julia/blob/master/contrib/filterArgs.sh) | Update library search code to use only tokens that start with -L |
+| [ fixup-freebsd-libs.sh ](https://github.com/JuliaLang/julia/blob/master/contrib/fixup-freebsd-libs.sh) | Patch system C++ libraries on FreeBSD |
 |[ fixup-libgfortran.sh ](https://github.com/JuliaLang/julia/blob/master/contrib/fixup-libgfortran.sh) | Include libgfortran  and libquadmath for installations |
 |[ fixup-libstdc++.sh ](https://github.com/JuliaLang/julia/blob/master/contrib/fixup-libstdc++.sh) | Include libstdc++ for    installations |
 |[ install.sh ](https://github.com/JuliaLang/julia/blob/master/contrib/install.sh) | Installation script with different permissions |
