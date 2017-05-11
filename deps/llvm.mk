@@ -175,6 +175,19 @@ LLVM_CPPFLAGS += -flto
 LLVM_LDFLAGS += -flto
 endif # LLVM_LTO
 
+ifeq ($(BUILD_CUSTOM_LIBCXX),1)
+LLVM_LDFLAGS += -Wl,-R$(build_libdir)
+LLVM_CXXFLAGS += -I$(build_includedir)
+LLVM_CPPFLAGS += -I$(build_includedir)
+LLVM_CFLAGS += -I$(build_includedir)
+LLVM_LIBCXX_FLAGS := -lc++ -lc++abi
+ifeq ($(USEICC),1)
+LLVM_LDFLAGS += -no_cpprt
+endif # USEICC
+else
+LLVM_LIBCXX_FLAGS :=
+endif # BUILD_CUSTOM_LIBCXX
+
 ifneq ($(LLVM_CXXFLAGS),)
 LLVM_FLAGS += CXXFLAGS="$(LLVM_CXXFLAGS)"
 LLVM_MFLAGS += CXXFLAGS="$(LLVM_CXXFLAGS)"
@@ -184,25 +197,16 @@ LLVM_FLAGS += CFLAGS="$(LLVM_CFLAGS)"
 LLVM_MFLAGS += CFLAGS="$(LLVM_CFLAGS)"
 endif # LLVM_CFLAGS
 
-ifeq ($(BUILD_CUSTOM_LIBCXX),1)
-LLVM_LDFLAGS += -Wl,-R$(build_libdir) -lc++ -lc++abi
-ifeq ($(USEICC),1)
-LLVM_LDFLAGS += -no_cpprt
-endif # USEICC
-endif # BUILD_CUSTOM_LIBCXX
-
 ifneq ($(LLVM_CPPFLAGS),)
 LLVM_FLAGS += CPPFLAGS="$(LLVM_CPPFLAGS)"
 LLVM_MFLAGS += CPPFLAGS="$(LLVM_CPPFLAGS)"
 endif
 ifneq ($(LLVM_LDFLAGS),)
-LLVM_FLAGS += LDFLAGS="$(LLVM_LDFLAGS)"
-LLVM_MFLAGS += LDFLAGS="$(LLVM_LDFLAGS)"
+LLVM_FLAGS += LDFLAGS="$(LLVM_LDFLAGS) $(LLVM_LIBCXX_FLAGS)"
+LLVM_MFLAGS += LDFLAGS="$(LLVM_LDFLAGS) $(LLVM_LIBCXX_FLAGS)"
 endif
 LLVM_CMAKE += -DCMAKE_C_FLAGS="$(LLVM_CPPFLAGS) $(LLVM_CFLAGS)" \
-	-DCMAKE_CXX_FLAGS="$(LLVM_CPPFLAGS) $(LLVM_CXXFLAGS)" \
-	-DCMAKE_EXE_LINKER_FLAGS="$(LLVM_LDFLAGS)" \
-	-DCMAKE_SHARED_LINKER_FLAGS="$(LLVM_LDFLAGS)"
+	-DCMAKE_CXX_FLAGS="$(LLVM_CPPFLAGS) $(LLVM_CXXFLAGS)"
 
 ifeq ($(BUILD_LLVM_CLANG),1)
 LLVM_MFLAGS += OPTIONAL_PARALLEL_DIRS=clang
@@ -271,8 +275,21 @@ LLVM_FLAGS += --with-python="$(shell $(SRCDIR)/tools/find_python2)"
 
 ifeq ($(BUILD_CUSTOM_LIBCXX),1)
 
+# Take a snapshot of the CMake flags before linking to -lc++ and -lc++abi
+# These are added to the LLVM CMake flags further down
+LLVM_CMAKE_LIBCXX := $(LLVM_CMAKE) \
+	-DCMAKE_EXE_LINKER_FLAGS="$(LLVM_LDFLAGS)" \
+	-DCMAKE_SHARED_LINKER_FLAGS="$(LLVM_LDFLAGS)"
+
 ifeq ($(USEICC),1)
 LIBCXX_EXTRA_FLAGS := -Bstatic -lirc -Bdynamic
+endif
+
+# These libraries require unwind.h from the libunwind dependency
+ifeq ($(USE_SYSTEM_LIBUNWIND),0)
+BUILT_UNWIND := $(build_prefix)/manifest/unwind
+else
+BUILT_UNWIND :=
 endif
 
 $(LLVM_SRC_DIR)/projects/libcxx: $(LLVM_LIBCXX_TAR) | $(LLVM_SRC_DIR)/source-extracted
@@ -290,27 +307,38 @@ $(LLVM_SRC_DIR)/projects/libcxxabi/.git/HEAD: | $(LLVM_SRC_DIR)/projects/libcxxa
 $(LLVM_BUILD_DIR)/libcxx-build/Makefile: | $(LLVM_SRC_DIR)/projects/libcxx $(LLVM_SRC_DIR)/projects/libcxxabi
 	mkdir -p $(dir $@)
 	cd $(dir $@) && \
-		$(CMAKE) -G "Unix Makefiles" $(CMAKE_COMMON) $(LLVM_CMAKE) -DLIBCXX_CXX_ABI=libcxxabi -DLIBCXX_CXX_ABI_INCLUDE_PATHS="$(LLVM_SRC_DIR)/projects/libcxxabi/include" $(LLVM_SRC_DIR)/projects/libcxx -DCMAKE_SHARED_LINKER_FLAGS="$(LDFLAGS) -L$(build_libdir) $(LIBCXX_EXTRA_FLAGS)"
+		$(CMAKE) -G "Unix Makefiles" $(CMAKE_COMMON) $(LLVM_CMAKE_LIBCXX) -DLIBCXX_CXX_ABI=libcxxabi -DLIBCXX_CXX_ABI_INCLUDE_PATHS="$(LLVM_SRC_DIR)/projects/libcxxabi/include" $(LLVM_SRC_DIR)/projects/libcxx -DCMAKE_SHARED_LINKER_FLAGS="$(LDFLAGS) -L$(build_libdir) $(LIBCXX_EXTRA_FLAGS)"
 $(LLVM_BUILD_DIR)/libcxxabi-build/Makefile: | $(LLVM_SRC_DIR)/projects/libcxxabi $(LLVM_SRC_DIR)/projects/libcxx
 	mkdir -p $(dir $@)
 	cd $(dir $@) && \
-		$(CMAKE) -G "Unix Makefiles" $(CMAKE_COMMON) $(LLVM_CMAKE) -DLLVM_ABI_BREAKING_CHECKS="WITH_ASSERTS" -DLLVM_PATH="$(LLVM_SRC_DIR)" $(LLVM_SRC_DIR)/projects/libcxxabi -DLIBCXXABI_CXX_ABI_LIBRARIES="$(LIBCXX_EXTRA_FLAGS)" -DCMAKE_CXX_FLAGS="$(LLVM_CPPFLAGS) $(LLVM_CXXFLAGS) -std=c++11"
+		$(CMAKE) -G "Unix Makefiles" $(CMAKE_COMMON) $(LLVM_CMAKE_LIBCXX) -DLLVM_ABI_BREAKING_CHECKS="WITH_ASSERTS" -DLLVM_PATH="$(LLVM_SRC_DIR)" $(LLVM_SRC_DIR)/projects/libcxxabi -DLIBCXXABI_CXX_ABI_LIBRARIES="$(LIBCXX_EXTRA_FLAGS)" -DCMAKE_CXX_FLAGS="$(LLVM_CPPFLAGS) $(LLVM_CXXFLAGS) -std=c++11"
 $(LLVM_BUILD_DIR)/libcxxabi-build/lib/libc++abi.so.1.0: $(LLVM_BUILD_DIR)/libcxxabi-build/Makefile $(LLVM_SRC_DIR)/projects/libcxxabi/.git/HEAD
 	$(MAKE) -C $(LLVM_BUILD_DIR)/libcxxabi-build
+	# The installed headers are not needed after building and can interfere with other dependencies
+	# FIXME: Find a better way to address this
+	-rm -rf $(build_includedir)/c++
 	touch -c $@
 $(build_libdir)/libc++abi.so.1.0: $(LLVM_BUILD_DIR)/libcxxabi-build/lib/libc++abi.so.1.0
 	$(MAKE) -C $(LLVM_BUILD_DIR)/libcxxabi-build install
+	-rm -rf $(build_includedir)/c++
 	touch -c $@
 $(LLVM_BUILD_DIR)/libcxx-build/lib/libc++.so.1.0: $(build_libdir)/libc++abi.so.1.0 $(LLVM_BUILD_DIR)/libcxx-build/Makefile $(LLVM_SRC_DIR)/projects/libcxx/.git/HEAD
 	$(MAKE) -C $(LLVM_BUILD_DIR)/libcxx-build
+	-rm -rf $(build_includedir)/c++
 $(build_libdir)/libc++.so.1.0: $(LLVM_BUILD_DIR)/libcxx-build/lib/libc++.so.1.0
 	$(MAKE) -C $(LLVM_BUILD_DIR)/libcxx-build install
+	-rm -rf $(build_includedir)/c++
 	touch -c $@
 get-libcxx: $(LLVM_SRC_DIR)/projects/libcxx
 get-libcxxabi: $(LLVM_SRC_DIR)/projects/libcxxabi
 install-libcxxabi: $(build_libdir)/libc++abi.so.1.0
 install-libcxx: $(build_libdir)/libc++.so.1.0
-endif
+endif # BUILD_CUSTOM_LIBCXX
+
+# We want to ensure that the libcxx linking flags don't get passed to the libcxx build, since it will
+# error on a fresh build
+LLVM_CMAKE += -DCMAKE_EXE_LINKER_FLAGS="$(LLVM_LDFLAGS) $(LLVM_LIBCXX_FLAGS)" \
+	-DCMAKE_SHARED_LINKER_FLAGS="$(LLVM_LDFLAGS) $(LLVM_LIBCXX_FLAGS)"
 
 ifeq ($(BUILD_CUSTOM_LIBCXX),1)
 LIBCXX_DEPENDENCY := $(build_libdir)/libc++abi.so.1.0 $(build_libdir)/libc++.so.1.0
